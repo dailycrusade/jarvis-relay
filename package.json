@@ -1,0 +1,20 @@
+{
+  "name": "jarvis-relay",
+  "version": "1.0.0",
+  "description": "JARVIS relay server — bridges clients to the Anthropic API with conversation history",
+  "type": "module",
+  "main": "relay-server.js",
+  "scripts": {
+    "start": "node relay-server.js",
+    "dev": "node --watch relay-server.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
+    "better-sqlite3": "^11.0.0",
+    "dotenv": "^16.4.0",
+    "express": "^4.21.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
