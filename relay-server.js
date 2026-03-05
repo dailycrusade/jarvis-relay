@@ -59,23 +59,26 @@ app.post('/ask', authenticate, async (req, res) => {
   // Fetch last 20 messages (newest first), then reverse for chronological order
   const history = getRecentMessages.all().reverse();
 
-  try {
-    const response = await client.messages.create({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 1024,
-      system: SYSTEM_PROMPT,
-      messages: history,
-    });
+  const models = ['claude-haiku-4-5-20251001', 'claude-sonnet-4-20250514'];
 
-    const reply = response.content[0].text;
+  for (const model of models) {
+    try {
+      const response = await client.messages.create({
+        model,
+        max_tokens: 300,
+        system: SYSTEM_PROMPT,
+        messages: history,
+      });
 
-    // Persist the assistant reply
-    insertMessage.run('assistant', reply, source);
-
-    res.json({ reply, source });
-  } catch (err) {
-    console.error('Anthropic API error:', err);
-    res.status(502).json({ error: 'Failed to get response from AI' });
+      const reply = response.content[0].text;
+      insertMessage.run('assistant', reply, source);
+      return res.json({ reply, source, model });
+    } catch (err) {
+      console.error(`Anthropic API error (${model}):`, err);
+      if (model === models.at(-1)) {
+        return res.status(502).json({ error: 'Failed to get response from AI' });
+      }
+    }
   }
 });
 
