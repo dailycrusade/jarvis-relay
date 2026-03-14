@@ -40,6 +40,58 @@ const getRecentMessages = db.prepare(
   'SELECT role, content FROM messages ORDER BY id DESC LIMIT 20'
 );
 
+const WEB_SEARCH_TOOLS = [{ type: 'web_search_20250305', name: 'web_search' }];
+
+// Run the Claude agentic loop with web search, returning the final text reply.
+async function runAgenticLoop(model, history) {
+  const messages = [...history];
+
+  let response = await client.messages.create({
+    model,
+    max_tokens: 1024,
+    system: SYSTEM_PROMPT,
+    messages,
+    tools: WEB_SEARCH_TOOLS,
+  });
+
+  while (response.stop_reason === 'tool_use') {
+    console.debug('[agentic] tool_use round, content:', JSON.stringify(response.content));
+
+    // Append Claude's turn (contains tool_use blocks)
+    messages.push({ role: 'assistant', content: response.content });
+
+    // For server-side tools like web_search, Anthropic returns tool_result
+    // blocks inside the same content array. Forward them as the user turn.
+    const toolResultBlocks = response.content.filter(b => b.type === 'tool_result');
+
+    if (toolResultBlocks.length > 0) {
+      messages.push({ role: 'user', content: toolResultBlocks });
+    } else {
+      // Fallback: acknowledge every tool_use so the loop can proceed
+      const toolUseBlocks = response.content.filter(b => b.type === 'tool_use');
+      messages.push({
+        role: 'user',
+        content: toolUseBlocks.map(b => ({
+          type: 'tool_result',
+          tool_use_id: b.id,
+          content: '',
+        })),
+      });
+    }
+
+    response = await client.messages.create({
+      model,
+      max_tokens: 1024,
+      system: SYSTEM_PROMPT,
+      messages,
+      tools: WEB_SEARCH_TOOLS,
+    });
+  }
+
+  const textBlock = response.content.find(b => b.type === 'text');
+  return textBlock?.text ?? '';
+}
+
 // Auth middleware
 function authenticate(req, res, next) {
   const key = req.headers['x-relay-key'];
@@ -73,14 +125,7 @@ app.post('/ask', authenticate, async (req, res) => {
 
   for (const model of models) {
     try {
-      const response = await client.messages.create({
-        model,
-        max_tokens: 300,
-        system: SYSTEM_PROMPT,
-        messages: history,
-      });
-
-      const reply = response.content[0].text;
+      const reply = await runAgenticLoop(model, history);
       insertMessage.run('assistant', reply, source);
 
       // Convert reply to speech via ElevenLabs
