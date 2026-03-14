@@ -42,14 +42,21 @@ const getRecentMessages = db.prepare(
 
 const WEB_SEARCH_TOOLS = [{ type: 'web_search_20250305', name: 'web_search' }];
 
+const VOICE_SOURCES = new Set(['siri', 'alexa']);
+const CLAUDE_TIMEOUT_MS = 25_000;
+const TIMEOUT_REPLY = "I'm sorry, that took too long. Please try again.";
+
 // Run the Claude agentic loop with web search, returning the final text reply.
-async function runAgenticLoop(model, history) {
+async function runAgenticLoop(model, history, source) {
   const messages = [...history];
+  const systemPrompt = VOICE_SOURCES.has(source)
+    ? `${SYSTEM_PROMPT} For voice responses keep answers under 4 sentences. Be direct and concise.`
+    : SYSTEM_PROMPT;
 
   let response = await client.messages.create({
     model,
     max_tokens: 1024,
-    system: SYSTEM_PROMPT,
+    system: systemPrompt,
     messages,
     tools: WEB_SEARCH_TOOLS,
   });
@@ -82,7 +89,7 @@ async function runAgenticLoop(model, history) {
     response = await client.messages.create({
       model,
       max_tokens: 1024,
-      system: SYSTEM_PROMPT,
+      system: systemPrompt,
       messages,
       tools: WEB_SEARCH_TOOLS,
     });
@@ -125,7 +132,10 @@ app.post('/ask', authenticate, async (req, res) => {
 
   for (const model of models) {
     try {
-      const reply = await runAgenticLoop(model, history);
+      const timeout = new Promise(resolve =>
+        setTimeout(() => resolve(TIMEOUT_REPLY), CLAUDE_TIMEOUT_MS)
+      );
+      const reply = await Promise.race([runAgenticLoop(model, history, source), timeout]);
       insertMessage.run('assistant', reply, source);
 
       // Convert reply to speech via ElevenLabs
