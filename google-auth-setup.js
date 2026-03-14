@@ -13,7 +13,11 @@ import express from 'express';
 import { exec } from 'child_process';
 
 const REDIRECT_URI = 'http://localhost:3000/oauth/callback';
-const SCOPES = ['https://www.googleapis.com/auth/calendar'];
+const SCOPES = [
+  'https://www.googleapis.com/auth/calendar',
+  'https://www.googleapis.com/auth/gmail.readonly',
+  'https://www.googleapis.com/auth/gmail.send',
+];
 
 const [clientId, clientSecret] = process.argv.slice(2);
 
