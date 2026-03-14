@@ -25,6 +25,7 @@ const oauth2Client = new google.auth.OAuth2(
 );
 oauth2Client.setCredentials({ refresh_token: process.env.GOOGLE_REFRESH_TOKEN });
 const calendar = google.calendar({ version: 'v3', auth: oauth2Client, timeZone: 'America/Chicago' });
+const gmail   = google.gmail({ version: 'v1', auth: oauth2Client });
 
 const SYSTEM_PROMPT =
   'You are JARVIS, a personal AI assistant. Be concise and warm. ' +
@@ -103,6 +104,52 @@ const TOOLS = [
     name: 'list_calendars',
     description: 'List all Google Calendars the user has access to.',
     input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'get_unread_emails',
+    description: 'Get the latest unread emails from Gmail.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        max_results: { type: 'number', description: 'Max emails to return (default 5)' },
+      },
+    },
+  },
+  {
+    name: 'search_emails',
+    description: 'Search Gmail using a query string (same syntax as the Gmail search box).',
+    input_schema: {
+      type: 'object',
+      properties: {
+        query:       { type: 'string', description: 'Gmail search query' },
+        max_results: { type: 'number', description: 'Max emails to return (default 5)' },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'get_email',
+    description: 'Get the full content of a specific email by ID.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        email_id: { type: 'string', description: 'Gmail message ID' },
+      },
+      required: ['email_id'],
+    },
+  },
+  {
+    name: 'send_email',
+    description: 'Send an email on behalf of the user.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        to:      { type: 'string', description: 'Recipient email address' },
+        subject: { type: 'string', description: 'Email subject' },
+        body:    { type: 'string', description: 'Plain text email body' },
+      },
+      required: ['to', 'subject', 'body'],
+    },
   },
 ];
 
@@ -190,13 +237,95 @@ async function calendarListCalendars() {
   }));
 }
 
-async function executeCalendarTool(name, input) {
+// ── Gmail tool implementations ────────────────────────────────────────────────
+
+function decodeBase64url(data) {
+  return Buffer.from(data, 'base64url').toString('utf-8');
+}
+
+function getHeader(headers, name) {
+  return headers?.find(h => h.name.toLowerCase() === name.toLowerCase())?.value ?? '';
+}
+
+function extractEmailBody(payload) {
+  if (!payload) return '';
+  if (payload.body?.data) return decodeBase64url(payload.body.data);
+  if (payload.parts) {
+    for (const part of payload.parts) {
+      if (part.mimeType === 'text/plain' && part.body?.data) {
+        return decodeBase64url(part.body.data);
+      }
+    }
+    for (const part of payload.parts) {
+      const body = extractEmailBody(part);
+      if (body) return body;
+    }
+  }
+  return '';
+}
+
+async function fetchEmailSummaries(query, maxResults) {
+  const listRes = await gmail.users.messages.list({ userId: 'me', q: query, maxResults });
+  const messages = listRes.data.messages ?? [];
+  return Promise.all(
+    messages.map(async m => {
+      const msg = await gmail.users.messages.get({
+        userId: 'me', id: m.id, format: 'metadata',
+        metadataHeaders: ['From', 'Subject', 'Date'],
+      });
+      const h = msg.data.payload?.headers ?? [];
+      return {
+        id:      m.id,
+        from:    getHeader(h, 'From'),
+        subject: getHeader(h, 'Subject'),
+        date:    getHeader(h, 'Date'),
+        snippet: msg.data.snippet ?? '',
+      };
+    })
+  );
+}
+
+async function gmailGetUnreadEmails({ max_results = 5 }) {
+  return fetchEmailSummaries('is:unread', max_results);
+}
+
+async function gmailSearchEmails({ query, max_results = 5 }) {
+  return fetchEmailSummaries(query, max_results);
+}
+
+async function gmailGetEmail({ email_id }) {
+  const msg = await gmail.users.messages.get({ userId: 'me', id: email_id, format: 'full' });
+  const h = msg.data.payload?.headers ?? [];
+  return {
+    id:      email_id,
+    from:    getHeader(h, 'From'),
+    subject: getHeader(h, 'Subject'),
+    date:    getHeader(h, 'Date'),
+    body:    extractEmailBody(msg.data.payload).slice(0, 2000),
+  };
+}
+
+async function gmailSendEmail({ to, subject, body }) {
+  const raw = Buffer.from(
+    `To: ${to}\nSubject: ${subject}\nContent-Type: text/plain; charset=utf-8\n\n${body}`
+  ).toString('base64url');
+  const res = await gmail.users.messages.send({ userId: 'me', requestBody: { raw } });
+  return { id: res.data.id, status: 'sent' };
+}
+
+// ── Tool dispatcher ───────────────────────────────────────────────────────────
+
+async function executeTool(name, input) {
   switch (name) {
     case 'get_calendar_events':   return calendarGetEvents(input);
     case 'create_calendar_event': return calendarCreateEvent(input);
     case 'get_todays_events':     return calendarGetTodaysEvents();
     case 'create_reminder':       return calendarCreateReminder(input);
     case 'list_calendars':        return calendarListCalendars();
+    case 'get_unread_emails':     return gmailGetUnreadEmails(input);
+    case 'search_emails':         return gmailSearchEmails(input);
+    case 'get_email':             return gmailGetEmail(input);
+    case 'send_email':            return gmailSendEmail(input);
     default: return { error: `Unknown tool: ${name}` };
   }
 }
@@ -238,7 +367,7 @@ async function runAgenticLoop(model, history, source) {
       clientSideUse.map(async b => {
         console.debug(`[agentic] executing tool: ${b.name}`, b.input);
         try {
-          const result = await executeCalendarTool(b.name, b.input);
+          const result = await executeTool(b.name, b.input);
           return { type: 'tool_result', tool_use_id: b.id, content: JSON.stringify(result) };
         } catch (err) {
           console.error(`[agentic] tool error (${b.name}):`, err);
