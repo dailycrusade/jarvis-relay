@@ -2,7 +2,11 @@ import express from 'express';
 import Database from 'better-sqlite3';
 import Anthropic from '@anthropic-ai/sdk';
 import { google } from 'googleapis';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
 import dotenv from 'dotenv';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 dotenv.config();
 
@@ -44,7 +48,11 @@ db.exec(`
     content   TEXT    NOT NULL,
     source    TEXT    NOT NULL,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  )
+  );
+  CREATE TABLE IF NOT EXISTS tool_states (
+    tool    TEXT PRIMARY KEY,
+    enabled INTEGER NOT NULL DEFAULT 1
+  );
 `);
 
 const insertMessage = db.prepare(
@@ -54,6 +62,35 @@ const insertMessage = db.prepare(
 const getRecentMessages = db.prepare(
   'SELECT role, content FROM messages ORDER BY id DESC LIMIT 20'
 );
+
+// Tool state helpers
+const initToolState  = db.prepare('INSERT OR IGNORE INTO tool_states (tool, enabled) VALUES (?, 1)');
+const getToolStateDb = db.prepare('SELECT enabled FROM tool_states WHERE tool = ?');
+const setToolStateDb = db.prepare('UPDATE tool_states SET enabled = ? WHERE tool = ?');
+
+for (const t of ['gmail', 'calendar', 'web_search']) initToolState.run(t);
+
+function isToolEnabled(category) {
+  return getToolStateDb.get(category)?.enabled !== 0;
+}
+
+// Map individual tool names → category
+const TOOL_CATEGORY = {
+  web_search:           'web_search',
+  get_calendar_events:  'calendar',
+  create_calendar_event:'calendar',
+  get_todays_events:    'calendar',
+  create_reminder:      'calendar',
+  list_calendars:       'calendar',
+  get_unread_emails:    'gmail',
+  search_emails:        'gmail',
+  get_email:            'gmail',
+  send_email:           'gmail',
+};
+
+function getEnabledTools() {
+  return TOOLS.filter(t => isToolEnabled(TOOL_CATEGORY[t.name] ?? t.name));
+}
 
 const TOOLS = [
   { type: 'web_search_20250305', name: 'web_search' },
@@ -316,6 +353,10 @@ async function gmailSendEmail({ to, subject, body }) {
 // ── Tool dispatcher ───────────────────────────────────────────────────────────
 
 async function executeTool(name, input) {
+  const category = TOOL_CATEGORY[name];
+  if (category && !isToolEnabled(category)) {
+    return { disabled: true, message: `The ${category} tool is currently disabled.` };
+  }
   switch (name) {
     case 'get_calendar_events':   return calendarGetEvents(input);
     case 'create_calendar_event': return calendarCreateEvent(input);
@@ -341,12 +382,14 @@ async function runAgenticLoop(model, history, source) {
     ? `${SYSTEM_PROMPT} For voice responses keep answers under 4 sentences. Be direct and concise.`
     : SYSTEM_PROMPT;
 
+  const enabledTools = getEnabledTools();
+
   let response = await client.messages.create({
     model,
     max_tokens: 1024,
     system: systemPrompt,
     messages,
-    tools: TOOLS,
+    tools: enabledTools,
   });
 
   while (response.stop_reason === 'tool_use') {
@@ -383,7 +426,7 @@ async function runAgenticLoop(model, history, source) {
       max_tokens: 1024,
       system: systemPrompt,
       messages,
-      tools: TOOLS,
+      tools: enabledTools,
     });
   }
 
@@ -478,6 +521,39 @@ app.post('/ask', authenticate, async (req, res) => {
       }
     }
   }
+});
+
+// ── Admin routes ──────────────────────────────────────────────────────────────
+
+function adminAuth(req, res, next) {
+  const key = req.headers['x-admin-key'];
+  if (!key || key !== process.env.ADMIN_SECRET) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  next();
+}
+
+// Serve the admin UI (no auth — the page itself requires the key for API calls)
+app.get('/admin', (_req, res) => {
+  res.sendFile(join(__dirname, 'admin.html'));
+});
+
+app.get('/admin/status', adminAuth, (_req, res) => {
+  const states = {};
+  for (const t of ['gmail', 'calendar', 'web_search']) {
+    states[t] = isToolEnabled(t);
+  }
+  res.json(states);
+});
+
+app.post('/admin/toggle', adminAuth, (req, res) => {
+  const { tool } = req.body;
+  if (!['gmail', 'calendar', 'web_search'].includes(tool)) {
+    return res.status(400).json({ error: 'Invalid tool name' });
+  }
+  const current = isToolEnabled(tool);
+  setToolStateDb.run(current ? 0 : 1, tool);
+  res.json({ tool, enabled: !current });
 });
 
 // Health check

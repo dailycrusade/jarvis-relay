@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>JARVIS Control Panel</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #0a0a0f;
+      color: #e2e8f0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 2rem 1rem;
+    }
+
+    header {
+      text-align: center;
+      margin-bottom: 2.5rem;
+    }
+    header h1 {
+      font-size: 1.75rem;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      color: #60a5fa;
+      text-transform: uppercase;
+    }
+    header p {
+      font-size: 0.8rem;
+      color: #64748b;
+      margin-top: 0.35rem;
+      letter-spacing: 0.05em;
+    }
+
+    #auth-panel {
+      background: #111827;
+      border: 1px solid #1e293b;
+      border-radius: 12px;
+      padding: 1.5rem;
+      width: 100%;
+      max-width: 400px;
+      margin-bottom: 1.5rem;
+    }
+    #auth-panel label {
+      display: block;
+      font-size: 0.75rem;
+      color: #94a3b8;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      margin-bottom: 0.5rem;
+    }
+    #auth-panel input {
+      width: 100%;
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      color: #e2e8f0;
+      font-size: 0.95rem;
+      padding: 0.6rem 0.75rem;
+      outline: none;
+      margin-bottom: 0.75rem;
+    }
+    #auth-panel input:focus { border-color: #60a5fa; }
+    #auth-panel button {
+      width: 100%;
+      background: #2563eb;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      padding: 0.65rem;
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+      letter-spacing: 0.04em;
+    }
+    #auth-panel button:hover { background: #1d4ed8; }
+    #auth-error { color: #f87171; font-size: 0.8rem; margin-top: 0.5rem; display: none; }
+
+    #control-panel {
+      width: 100%;
+      max-width: 400px;
+      display: none;
+      flex-direction: column;
+      gap: 1rem;
+    }
+
+    .tool-card {
+      background: #111827;
+      border: 1px solid #1e293b;
+      border-radius: 12px;
+      padding: 1.25rem 1.5rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      transition: border-color 0.2s;
+    }
+    .tool-card.enabled  { border-color: #166534; }
+    .tool-card.disabled { border-color: #7f1d1d; }
+
+    .tool-info { flex: 1; min-width: 0; }
+    .tool-name {
+      font-size: 1rem;
+      font-weight: 600;
+      color: #e2e8f0;
+    }
+    .tool-status {
+      font-size: 0.75rem;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      margin-top: 0.2rem;
+    }
+    .tool-card.enabled  .tool-status { color: #4ade80; }
+    .tool-card.disabled .tool-status { color: #f87171; }
+
+    /* Toggle switch */
+    .toggle { position: relative; width: 52px; height: 28px; flex-shrink: 0; }
+    .toggle input { opacity: 0; width: 0; height: 0; }
+    .slider {
+      position: absolute; inset: 0;
+      background: #374151;
+      border-radius: 28px;
+      cursor: pointer;
+      transition: background 0.25s;
+    }
+    .slider::before {
+      content: '';
+      position: absolute;
+      width: 22px; height: 22px;
+      left: 3px; top: 3px;
+      background: #fff;
+      border-radius: 50%;
+      transition: transform 0.25s;
+    }
+    .toggle input:checked + .slider { background: #16a34a; }
+    .toggle input:checked + .slider::before { transform: translateX(24px); }
+    .toggle input:disabled + .slider { opacity: 0.5; cursor: not-allowed; }
+
+    #status-bar {
+      width: 100%;
+      max-width: 400px;
+      text-align: center;
+      font-size: 0.75rem;
+      color: #475569;
+      margin-top: 1.5rem;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>JARVIS Control Panel</h1>
+    <p>Tool management interface</p>
+  </header>
+
+  <div id="auth-panel">
+    <label for="key-input">Admin Key</label>
+    <input id="key-input" type="password" placeholder="Enter admin secret…" />
+    <button onclick="connect()">Connect</button>
+    <div id="auth-error">Invalid key — try again.</div>
+  </div>
+
+  <div id="control-panel">
+    <div class="tool-card" id="card-gmail">
+      <div class="tool-info">
+        <div class="tool-name">Gmail</div>
+        <div class="tool-status" id="status-gmail">—</div>
+      </div>
+      <label class="toggle">
+        <input type="checkbox" id="toggle-gmail" onchange="toggle('gmail', this)" />
+        <span class="slider"></span>
+      </label>
+    </div>
+
+    <div class="tool-card" id="card-calendar">
+      <div class="tool-info">
+        <div class="tool-name">Google Calendar</div>
+        <div class="tool-status" id="status-calendar">—</div>
+      </div>
+      <label class="toggle">
+        <input type="checkbox" id="toggle-calendar" onchange="toggle('calendar', this)" />
+        <span class="slider"></span>
+      </label>
+    </div>
+
+    <div class="tool-card" id="card-web_search">
+      <div class="tool-info">
+        <div class="tool-name">Web Search</div>
+        <div class="tool-status" id="status-web_search">—</div>
+      </div>
+      <label class="toggle">
+        <input type="checkbox" id="toggle-web_search" onchange="toggle('web_search', this)" />
+        <span class="slider"></span>
+      </label>
+    </div>
+  </div>
+
+  <div id="status-bar"></div>
+
+  <script>
+    const TOOLS = ['gmail', 'calendar', 'web_search'];
+    let adminKey = sessionStorage.getItem('jarvis_admin_key') || '';
+
+    if (adminKey) loadStatus();
+
+    async function connect() {
+      adminKey = document.getElementById('key-input').value.trim();
+      const err = document.getElementById('auth-error');
+      err.style.display = 'none';
+      try {
+        const ok = await loadStatus();
+        if (ok) {
+          sessionStorage.setItem('jarvis_admin_key', adminKey);
+        } else {
+          adminKey = '';
+          err.style.display = 'block';
+        }
+      } catch {
+        adminKey = '';
+        err.style.display = 'block';
+      }
+    }
+
+    async function loadStatus() {
+      const res = await fetch('/admin/status', {
+        headers: { 'X-Admin-Key': adminKey },
+      });
+      if (!res.ok) return false;
+
+      const states = await res.json();
+      document.getElementById('auth-panel').style.display = 'none';
+      const panel = document.getElementById('control-panel');
+      panel.style.display = 'flex';
+
+      for (const tool of TOOLS) applyState(tool, states[tool]);
+      setStatusBar('Connected');
+      return true;
+    }
+
+    async function toggle(tool, checkbox) {
+      checkbox.disabled = true;
+      try {
+        const res = await fetch('/admin/toggle', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Admin-Key': adminKey },
+          body: JSON.stringify({ tool }),
+        });
+        if (!res.ok) throw new Error('Request failed');
+        const { enabled } = await res.json();
+        applyState(tool, enabled);
+        setStatusBar(`${tool} ${enabled ? 'enabled' : 'disabled'}`);
+      } catch (e) {
+        setStatusBar('Error — reload and try again.');
+        checkbox.checked = !checkbox.checked; // revert optimistic UI
+      } finally {
+        checkbox.disabled = false;
+      }
+    }
+
+    function applyState(tool, enabled) {
+      const card   = document.getElementById(`card-${tool}`);
+      const status = document.getElementById(`status-${tool}`);
+      const chk    = document.getElementById(`toggle-${tool}`);
+      card.className   = `tool-card ${enabled ? 'enabled' : 'disabled'}`;
+      status.textContent = enabled ? 'Enabled' : 'Disabled';
+      chk.checked      = enabled;
+    }
+
+    function setStatusBar(msg) {
+      const bar = document.getElementById('status-bar');
+      bar.textContent = msg;
+      setTimeout(() => { bar.textContent = ''; }, 3000);
+    }
+
+    document.getElementById('key-input')
+      .addEventListener('keydown', e => { if (e.key === 'Enter') connect(); });
+  </script>
+</body>
+</html>
