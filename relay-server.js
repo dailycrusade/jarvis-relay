@@ -82,7 +82,38 @@ app.post('/ask', authenticate, async (req, res) => {
 
       const reply = response.content[0].text;
       insertMessage.run('assistant', reply, source);
-      return res.json({ reply, source, model });
+
+      // Convert reply to speech via ElevenLabs
+      let audio_base64 = null;
+      try {
+        const ttsRes = await fetch(
+          `https://api.elevenlabs.io/v1/text-to-speech/${process.env.ELEVENLABS_VOICE_ID}`,
+          {
+            method: 'POST',
+            headers: {
+              'xi-api-key': process.env.ELEVENLABS_API_KEY,
+              'Content-Type': 'application/json',
+              Accept: 'audio/mpeg',
+            },
+            body: JSON.stringify({
+              text: reply,
+              model_id: 'eleven_turbo_v2',
+              output_format: 'mp3_44100_128',
+            }),
+          }
+        );
+        if (!ttsRes.ok) {
+          const errText = await ttsRes.text();
+          console.error(`ElevenLabs error (${ttsRes.status}):`, errText);
+        } else {
+          const arrayBuf = await ttsRes.arrayBuffer();
+          audio_base64 = Buffer.from(arrayBuf).toString('base64');
+        }
+      } catch (ttsErr) {
+        console.error('ElevenLabs fetch error:', ttsErr);
+      }
+
+      return res.json({ reply, audio_base64, source, model });
     } catch (err) {
       console.error(`Anthropic API error (${model}):`, err);
       if (model === models.at(-1)) {
