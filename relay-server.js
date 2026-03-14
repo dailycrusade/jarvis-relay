@@ -99,6 +99,11 @@ const TOOLS = [
       required: ['title', 'datetime'],
     },
   },
+  {
+    name: 'list_calendars',
+    description: 'List all Google Calendars the user has access to.',
+    input_schema: { type: 'object', properties: {} },
+  },
 ];
 
 // ── Calendar tool implementations ────────────────────────────────────────────
@@ -175,12 +180,23 @@ async function calendarCreateReminder({ title, datetime }) {
   return { id: res.data.id, title: res.data.summary, link: res.data.htmlLink };
 }
 
+async function calendarListCalendars() {
+  const res = await calendar.calendarList.list();
+  return (res.data.items ?? []).map(c => ({
+    id:         c.id,
+    summary:    c.summary,
+    accessRole: c.accessRole,
+    primary:    c.primary ?? false,
+  }));
+}
+
 async function executeCalendarTool(name, input) {
   switch (name) {
-    case 'get_calendar_events':  return calendarGetEvents(input);
+    case 'get_calendar_events':   return calendarGetEvents(input);
     case 'create_calendar_event': return calendarCreateEvent(input);
-    case 'get_todays_events':    return calendarGetTodaysEvents();
-    case 'create_reminder':      return calendarCreateReminder(input);
+    case 'get_todays_events':     return calendarGetTodaysEvents();
+    case 'create_reminder':       return calendarCreateReminder(input);
+    case 'list_calendars':        return calendarListCalendars();
     default: return { error: `Unknown tool: ${name}` };
   }
 }
