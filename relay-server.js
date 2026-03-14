@@ -28,7 +28,9 @@ const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
 
 const SYSTEM_PROMPT =
   'You are JARVIS, a personal AI assistant. Be concise and warm. ' +
-  'Keep voice responses under 3 sentences unless detail is requested.';
+  'Keep voice responses under 3 sentences unless detail is requested. ' +
+  'Never use markdown formatting in responses. ' +
+  'Write in plain conversational text suitable for text-to-speech.';
 
 // Initialize DB
 db.exec(`
@@ -280,6 +282,16 @@ app.post('/ask', authenticate, async (req, res) => {
       const reply = await Promise.race([runAgenticLoop(model, history, source), timeout]);
       insertMessage.run('assistant', reply, source);
 
+      // Strip markdown before sending to TTS
+      const ttsText = reply
+        .replace(/#{1,6}\s*/g, '')           // # headers
+        .replace(/\*\*(.+?)\*\*/g, '$1')     // **bold**
+        .replace(/\*(.+?)\*/g, '$1')         // *italic*
+        .replace(/_(.+?)_/g, '$1')           // _italic_
+        .replace(/^\s*[-•]\s+/gm, '')        // bullet points
+        .replace(/^\s*(\d+)\.\s+/gm, '$1. ') // normalise numbered lists
+        .trim();
+
       // Convert reply to speech via ElevenLabs
       let audio_base64 = null;
       try {
@@ -293,7 +305,7 @@ app.post('/ask', authenticate, async (req, res) => {
               Accept: 'audio/mpeg',
             },
             body: JSON.stringify({
-              text: reply,
+              text: ttsText,
               model_id: 'eleven_turbo_v2',
               output_format: 'mp3_44100_128',
             }),
