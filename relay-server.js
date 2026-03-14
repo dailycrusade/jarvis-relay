@@ -24,13 +24,16 @@ const oauth2Client = new google.auth.OAuth2(
   process.env.GOOGLE_CLIENT_SECRET
 );
 oauth2Client.setCredentials({ refresh_token: process.env.GOOGLE_REFRESH_TOKEN });
-const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
+const calendar = google.calendar({ version: 'v3', auth: oauth2Client, timeZone: 'America/Chicago' });
 
 const SYSTEM_PROMPT =
   'You are JARVIS, a personal AI assistant. Be concise and warm. ' +
   'Keep voice responses under 3 sentences unless detail is requested. ' +
   'Never use markdown formatting in responses. ' +
-  'Write in plain conversational text suitable for text-to-speech.';
+  'Write in plain conversational text suitable for text-to-speech. ' +
+  'The user is in the Central Time zone (America/Chicago). ' +
+  'When creating calendar events always use America/Chicago timezone. ' +
+  'When told a time like 1PM assume it means 1PM Central.';
 
 // Initialize DB
 db.exec(`
@@ -133,8 +136,8 @@ async function calendarCreateEvent({ title, start_datetime, end_datetime, descri
     requestBody: {
       summary:     title,
       description: description ?? '',
-      start: { dateTime: new Date(start_datetime).toISOString() },
-      end:   { dateTime: new Date(end_datetime).toISOString() },
+      start: { dateTime: new Date(start_datetime).toISOString(), timeZone: 'America/Chicago' },
+      end:   { dateTime: new Date(end_datetime).toISOString(),   timeZone: 'America/Chicago' },
     },
   });
   return { id: res.data.id, title: res.data.summary, link: res.data.htmlLink };
@@ -161,8 +164,8 @@ async function calendarCreateReminder({ title, datetime }) {
     calendarId:  'primary',
     requestBody: {
       summary: title,
-      start:   { dateTime: start.toISOString() },
-      end:     { dateTime: end.toISOString() },
+      start:   { dateTime: start.toISOString(), timeZone: 'America/Chicago' },
+      end:     { dateTime: end.toISOString(),   timeZone: 'America/Chicago' },
       reminders: {
         useDefault: false,
         overrides:  [{ method: 'popup', minutes: 0 }],
