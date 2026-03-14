@@ -6,7 +6,13 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 const app = express();
-app.use(express.json());
+app.use(
+  express.json({
+    verify: (req, _res, buf) => {
+      req.rawBody = buf.toString('utf8');
+    },
+  })
+);
 
 const db = new Database('conversations.db');
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -44,6 +50,10 @@ function authenticate(req, res, next) {
 }
 
 app.post('/ask', authenticate, async (req, res) => {
+  console.debug('[/ask] headers:', req.headers);
+  console.debug('[/ask] raw body:', req.rawBody);
+  console.debug('[/ask] parsed body:', req.body);
+
   const { query, source } = req.body;
 
   if (!query || typeof query !== 'string') {
